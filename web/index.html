@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Keypad Studio</title>
+  <link rel="stylesheet" href="vendor/tabler/tabler-icons.min.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="brand-mark" title="Keypad Studio">
+        <div class="brand-dots"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <nav id="rail-nav">
+        <button class="rail-btn active" data-nav="home" title="主页" aria-label="主页"></button>
+        <button class="rail-btn" data-nav="actions" title="动作库" aria-label="动作库"></button>
+        <button class="rail-btn" data-nav="profiles" title="配置" aria-label="配置"></button>
+        <button class="rail-btn" data-nav="device" title="设备" aria-label="设备"></button>
+        <button class="rail-btn" data-nav="hub" title="外设中心" aria-label="外设中心"></button>
+      </nav>
+      <div class="rail-bottom">
+        <button class="rail-btn" data-nav="settings" title="设置" aria-label="设置"></button>
+        <button class="rail-btn" id="theme-toggle" data-action="toggle-theme" title="切换明暗主题" aria-label="切换明暗主题"></button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="crumbs">
+          <h2 id="crumb-title">按键布局</h2>
+        </div>
+        <div class="top-actions">
+          <button class="profile-pill" data-action="open-profile-menu" title="切换配置">
+            <span class="profile-dot" id="profile-dot"></span>
+            <span id="profile-name">默认配置</span>
+          </button>
+          <button class="device-status" data-nav="device" id="device-status">
+            <span class="status-dot"></span>
+            <span id="device-status-text">正在连接…</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="view" id="view">
+        <div class="view-inner" id="view-inner">
+          <div class="empty">
+            <div class="empty-icon" id="loading-icon"></div>
+            <h3>正在加载 Keypad Studio</h3>
+            <p>正在读取设备与配置…</p>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root"></div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+Keypad Studio bundles the following third-party components:
+
+- Tabler Icons 3.31.0 — MIT License — https://github.com/tabler/tabler-icons
+- HIDAPI — BSD-style / GPL-3.0 dual license — https://github.com/libusb/hidapi
+- pywebview — BSD 3-Clause — https://github.com/r0x0r/pywebview
+- pythonnet — MIT License — https://github.com/pythonnet/pythonnet
+- pystray — LGPL-3.0 — https://github.com/moses-palmer/pystray
+- Pillow — HPND License — https://github.com/python-pillow/Pillow
+- PyInstaller — GPL-2.0 with bootloader exception — https://github.com/pyinstaller/pyinstaller
+
+Full license texts are available from the upstream projects.
