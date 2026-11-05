@@ -215,9 +215,26 @@ class Api:
                 self.peripherals.set_dpi(int(payload.get("stage")), int(payload.get("dpi")))
             elif action == "stage":
                 self.peripherals.set_active_stage(int(payload.get("stage")))
+            elif action == "mouse_setting":
+                self.peripherals.set_mouse_setting(str(payload.get("name")), payload.get("value"))
             elif action != "refresh":
                 return {"ok": False, "error": f"未知操作：{action}"}
             return {"ok": True, "hub": self.peripherals.snapshot()}
+        except Exception as exc:
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc)}
+
+    def gamepad_state(self) -> dict:
+        try:
+            return {"ok": True, "gamepad": self.peripherals.gamepad_state()}
+        except Exception as exc:
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc)}
+
+    def gamepad_action(self, action: str, payload: dict | None = None) -> dict:
+        try:
+            self.peripherals.gamepad_action(action, payload or {})
+            return {"ok": True, "gamepad": self.peripherals.gamepad_state()}
         except Exception as exc:
             traceback.print_exc()
             return {"ok": False, "error": str(exc)}

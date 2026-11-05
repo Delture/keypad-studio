@@ -1,4 +1,6 @@
-"""Peripheral hub: battery / polling rate / DPI for the M75 keyboard and G04 Ultra mouse.
+"""Peripheral hub: battery for the M75 keyboard, battery / polling rate / DPI
+and sensor settings for the G04 Ultra mouse, and XInput state for the
+Rainbow 2 SE gamepad.
 
 Protocols were reverse engineered from the vendors' own drivers:
 
@@ -12,6 +14,10 @@ Protocols were reverse engineered from the vendors' own drivers:
   0x13 = device info, 0x17 = performance config, 0x19 = DPI stages,
   0x18 = write performance config, 0x1A = write DPI stages,
   0x22 = select active DPI stage.
+
+* Rainbow 2 SE gamepad: XInput (xinput1_4.dll / 1_3 / 9_1_0) for live input,
+  rumble and coarse battery.  The vendor's private protocol is not used here,
+  so remapping, gyro, macros and firmware stay outside this module.
 """
 from __future__ import annotations
 
@@ -20,6 +26,8 @@ import time
 from typing import Any
 
 import hid
+
+from .gamepad import GamepadManager
 
 KEYBOARD_VID = 0x0C45
 KEYBOARD_PID = 0xFEFE
@@ -37,6 +45,28 @@ MOUSE_DPI_STEP = 50
 MOUSE_DPI_MIN = 50
 MOUSE_DPI_MAX = 42000
 MOUSE_STAGES_MAX = 8
+
+MOUSE_LOD_OPTIONS = [
+    {"value": 0, "label": "0.7 / 1 mm（玻璃）"},
+    {"value": 1, "label": "1 mm"},
+    {"value": 2, "label": "2 mm"},
+]
+MOUSE_SLEEP_OPTIONS = [
+    {"value": 1, "label": "10 秒"},
+    {"value": 3, "label": "30 秒"},
+    {"value": 6, "label": "1 分钟"},
+    {"value": 12, "label": "2 分钟"},
+    {"value": 18, "label": "3 分钟"},
+    {"value": 30, "label": "5 分钟"},
+    {"value": 60, "label": "10 分钟"},
+    {"value": 90, "label": "15 分钟"},
+]
+MOUSE_RIPPLE_OPTIONS = [
+    {"value": 0, "label": "自动（默认）"},
+    {"value": 1, "label": "开启"},
+    {"value": 2, "label": "关闭"},
+]
+MOUSE_DEBOUNCE_MAX = 15
 
 WIRELESS_RATES = [
     {"label": "8000", "code": 64},
@@ -62,6 +92,7 @@ def _open(path: bytes) -> hid.device:
 class PeripheralHub:
     def __init__(self) -> None:
         self.lock = threading.RLock()
+        self.gamepad = GamepadManager()
 
     # ------------------------------------------------------------------
     # Discovery
@@ -122,7 +153,7 @@ class PeripheralHub:
         finally:
             dev.close()
         if battery is None:
-            raise PeripheralError("暂时读不到键盘电量，请确认键盘已开机后点「重新扫描」")
+            raise PeripheralError("暂时读不到键盘电量，请先按一下键盘任意键唤醒，再点「重新扫描」")
         return {
             "connected": True,
             "model": "新盟 M75",
@@ -159,6 +190,27 @@ class PeripheralHub:
         return list(report[3:63])
 
     @staticmethod
+    def _mouse_options() -> dict[str, Any]:
+        return {
+            "lod": MOUSE_LOD_OPTIONS,
+            "sleep": MOUSE_SLEEP_OPTIONS,
+            "ripple": MOUSE_RIPPLE_OPTIONS,
+            "debounce_max": MOUSE_DEBOUNCE_MAX,
+        }
+
+    @classmethod
+    def _mouse_config_state(cls, config: list[int]) -> dict[str, Any]:
+        return {
+            "silent_height": int(config[6]),
+            "key_debounce_time": int(config[7]),
+            "motion_sync_enable": config[8] == 1,
+            "linear_correction_enable": config[10] == 1,
+            "ripple_control_option": int(config[11]),
+            "sensor_power_saving_enable": config[15] == 0,
+            "sleep_time": int(config[25]),
+        }
+
+    @staticmethod
     def _decode_stage(config: list[int], index: int) -> dict[str, Any]:
         base = index * 6
         lo_x, lo_y, flags = config[base], config[base + 1], config[base + 2]
@@ -187,6 +239,7 @@ class PeripheralHub:
                 "model": "AUSDOM G04 Ultra",
                 "link": "2.4G",
                 "rates": WIRELESS_RATES,
+                "options": self._mouse_options(),
             }
         dev = _open(path)
         try:
@@ -194,7 +247,7 @@ class PeripheralHub:
             if not info or len(info) < 20:
                 raise PeripheralError("鼠标没有返回设备信息")
             perf = self._mouse_read(dev, 0x17)
-            if not perf or len(perf) < 10:
+            if not perf or len(perf) < 34:
                 raise PeripheralError("鼠标没有返回性能配置")
             dpi_raw = self._mouse_read(dev, 0x19)
             if not dpi_raw or len(dpi_raw) < 51:
@@ -226,6 +279,8 @@ class PeripheralHub:
             "dpi_min": MOUSE_DPI_MIN,
             "dpi_max": MOUSE_DPI_MAX,
             "dpi_step": MOUSE_DPI_STEP,
+            "config": self._mouse_config_state(config),
+            "options": self._mouse_options(),
         }
 
     # ------------------------------------------------------------------
@@ -316,6 +371,82 @@ class PeripheralHub:
         if now != stage:
             raise PeripheralError("切换档位失败")
 
+    @staticmethod
+    def _mouse_setting_patch(name: str, value: Any) -> tuple[int, int]:
+        """Map one UI setting to (config index, byte value), matching the
+        vendor driver's own write layout."""
+        if name == "silent_height":
+            number = int(value)
+            if number not in (0, 1, 2):
+                raise PeripheralError("静默高度取值无效")
+            return 6, number
+        if name == "key_debounce_time":
+            number = int(value)
+            if not (0 <= number <= MOUSE_DEBOUNCE_MAX):
+                raise PeripheralError(f"按键去抖需要在 0 - {MOUSE_DEBOUNCE_MAX} ms 之间")
+            return 7, number
+        if name == "motion_sync_enable":
+            return 8, 1 if value else 0
+        if name == "linear_correction_enable":
+            return 10, 1 if value else 0
+        if name == "ripple_control_option":
+            number = int(value)
+            if number not in (0, 1, 2):
+                raise PeripheralError("波纹控制取值无效")
+            return 11, number
+        if name == "sensor_power_saving_enable":
+            # The vendor driver stores the inverse: 0 means power saving on.
+            return 15, 0 if value else 1
+        if name == "sleep_time":
+            number = int(value)
+            if number not in {item["value"] for item in MOUSE_SLEEP_OPTIONS}:
+                raise PeripheralError("休眠时间取值无效")
+            return 25, number
+        raise PeripheralError(f"未知鼠标设置：{name}")
+
+    def set_mouse_setting(self, name: str, value: Any) -> None:
+        path = self.mouse_path()
+        if not path:
+            raise PeripheralError("未找到鼠标接收器")
+        dev = _open(path)
+        try:
+            perf = self._mouse_read(dev, 0x17)
+            if not perf or len(perf) < 34:
+                raise PeripheralError("读取鼠标配置失败")
+            config = self._mouse_config(perf)
+            index, byte = self._mouse_setting_patch(name, value)
+            config[index] = byte
+            self._mouse_write(dev, [0x18, MOUSE_CONFIG_MODE] + config)
+            time.sleep(0.15)
+            check = self._mouse_read(dev, 0x17)
+        finally:
+            dev.close()
+        if not check or len(check) < 34:
+            raise PeripheralError("写入鼠标设置后没有收到确认")
+        if self._mouse_config(check)[index] != byte:
+            raise PeripheralError("鼠标设置写入失败")
+
+    # ------------------------------------------------------------------
+    # Gamepad
+    # ------------------------------------------------------------------
+
+    def gamepad_state(self) -> dict[str, Any]:
+        with self.lock:
+            return self.gamepad.state()
+
+    def gamepad_action(self, action: str, payload: dict[str, Any] | None = None) -> None:
+        payload = payload or {}
+        if action == "vibrate":
+            self.gamepad.vibrate(
+                payload.get("left", 60),
+                payload.get("right", 60),
+                payload.get("duration_ms", 450),
+            )
+        elif action == "stop":
+            self.gamepad.stop()
+        else:
+            raise PeripheralError(f"未知手柄操作：{action}")
+
     # ------------------------------------------------------------------
     # Snapshot
     # ------------------------------------------------------------------
@@ -336,4 +467,8 @@ class PeripheralHub:
                     except Exception:
                         present = False
                     result[key] = {"connected": present, "error": str(exc)}
+            try:
+                result["gamepad"] = self.gamepad.state()
+            except Exception as exc:
+                result["gamepad"] = {"connected": False, "error": str(exc)}
             return result

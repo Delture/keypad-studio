@@ -23,6 +23,10 @@
     hub: null,
     hubBusy: false,
     hubTimer: null,
+    gamepad: null,
+    gamepadTimer: null,
+    gamepadBusy: false,
+    gamepadMetaKey: "",
     modalScroll: 0,
     recording: false,
   };
@@ -48,16 +52,38 @@
 
   const TOP_ICON = { actions: "grid", profiles: "layers", settings: "settings" };
   const VIEW_TITLE = {
-    overview: "设备总览",
+    overview: "设备中枢",
     keypad: "小键盘",
     keyboard: "新盟 M75 键盘",
     mouse: "AUSDOM G04 Ultra 鼠标",
+    gamepad: "BIGBIG WON Rainbow 2 SE",
     device: "设备诊断",
     actions: "动作库",
     profiles: "配置",
     settings: "设置",
   };
   const HUB_VIEWS = new Set(["overview", "keyboard", "mouse"]);
+
+  const GAMEPAD_BUTTON_LABELS = {
+    up: "十字上",
+    down: "十字下",
+    left: "十字左",
+    right: "十字右",
+    start: "菜单",
+    back: "视图",
+    l3: "L3",
+    r3: "R3",
+    lb: "LB",
+    rb: "RB",
+    a: "A",
+    b: "B",
+    x: "X",
+    y: "Y",
+  };
+
+  function emptyGamepadButtons() {
+    return Object.fromEntries(Object.keys(GAMEPAD_BUTTON_LABELS).map((key) => [key, false]));
+  }
 
   // ------------------------------------------------------------------
   // Helpers
@@ -297,6 +323,33 @@
     }
   }
 
+  function demoGamepad() {
+    return {
+      connected: true,
+      available: true,
+      model: "BIGBIG WON Rainbow 2 SE",
+      xinput: true,
+      slot: 0,
+      packet: 20841,
+      link: "2.4G 接收器",
+      wireless: true,
+      receiver: true,
+      battery: null,
+      battery_type: 1,
+      battery_level: 3,
+      battery_type_label: "有线供电",
+      battery_level_label: "充足",
+      battery_label: "接收器供电",
+      battery_note: "2.4G 接收器由 USB 供电，XInput 不提供手柄电量百分比",
+      charging: true,
+      buttons: emptyGamepadButtons(),
+      buttons_down: [],
+      triggers: { left: 0, right: 0 },
+      sticks: { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } },
+      product: "XBOX 360 For Windows",
+    };
+  }
+
   function demoHub() {
     return {
       keyboard: { connected: true, model: "新盟 M75", link: "2.4G", battery: 82, charging: false },
@@ -321,7 +374,35 @@
         dpi_min: 50,
         dpi_max: 42000,
         dpi_step: 50,
+        config: {
+          silent_height: 1,
+          key_debounce_time: 0,
+          motion_sync_enable: false,
+          linear_correction_enable: false,
+          ripple_control_option: 0,
+          sensor_power_saving_enable: false,
+          sleep_time: 90,
+        },
+        options: {
+          lod: [
+            { value: 0, label: "0.7 / 1 mm（玻璃）" },
+            { value: 1, label: "1 mm" },
+            { value: 2, label: "2 mm" },
+          ],
+          sleep: [
+            { value: 1, label: "10 秒" }, { value: 3, label: "30 秒" }, { value: 6, label: "1 分钟" },
+            { value: 12, label: "2 分钟" }, { value: 18, label: "3 分钟" }, { value: 30, label: "5 分钟" },
+            { value: 60, label: "10 分钟" }, { value: 90, label: "15 分钟" },
+          ],
+          ripple: [
+            { value: 0, label: "自动（默认）" },
+            { value: 1, label: "开启" },
+            { value: 2, label: "关闭" },
+          ],
+          debounce_max: 15,
+        },
       },
+      gamepad: demoGamepad(),
     };
   }
 
@@ -338,6 +419,8 @@
       async device_action() { return { ok: true }; },
       async hub_state() { return { ok: true, hub: demoHub() }; },
       async hub_action() { return { ok: true, hub: demoHub() }; },
+      async gamepad_state() { return { ok: true, gamepad: demoGamepad() }; },
+      async gamepad_action() { return { ok: true, gamepad: demoGamepad() }; },
       async test_action() { return { ok: true }; },
       async poll_events() { return []; },
       async set_autostart(v) { S.config.settings.autostart = v; return { ok: true }; },
@@ -369,7 +452,10 @@
     document.documentElement.dataset.theme = S.config.settings.theme || "dark";
     updateThemeIcon();
     renderAll();
-    if (!S.demo && HUB_VIEWS.has(S.view)) ensureHubPolling();
+    if (!S.demo) {
+      ensureHubPolling();
+      ensureGamepadPolling();
+    }
   }
 
   function startPolling() {
@@ -635,6 +721,21 @@
         await hubAction("dpi", { stage: Number(ds.stage), dpi: value });
         break;
       }
+      case "gp-refresh":
+        S.gamepad = null;
+        await loadGamepad();
+        renderView();
+        break;
+      case "gp-vibrate": {
+        const strength = ds.strength === "strong"
+          ? { left: 90, right: 90, duration_ms: 600 }
+          : { left: 35, right: 30, duration_ms: 220 };
+        await gamepadAction("vibrate", strength);
+        break;
+      }
+      case "gp-stop":
+        await gamepadAction("stop");
+        break;
       case "update-check":
         S.runtime.update = { ...(S.runtime.update || {}), phase: "checking", error: null };
         renderView();
@@ -690,6 +791,13 @@
     const el = e.target;
     if (el.matches('[data-role="hub-dpi"]')) {
       hubAction("dpi", { stage: Number(el.dataset.stage), dpi: Number(el.value) });
+      return;
+    }
+    if (el.hasAttribute("data-mouse-setting")) {
+      if (S.hubBusy) return;
+      const name = el.dataset.mouseSetting;
+      const value = el.type === "checkbox" ? el.checked : Number(el.value);
+      hubAction("mouse_setting", { name, value });
       return;
     }
     if (el.hasAttribute("data-setting")) {
@@ -820,6 +928,7 @@
     const viewEl = $(".view");
     if (viewEl) viewEl.scrollTop = 0;
     ensureHubPolling();
+    ensureGamepadPolling();
   }
 
   function ensureHubPolling() {
@@ -837,7 +946,7 @@
     if (res?.ok && res.hub) {
       S.hub = res.hub;
       const active = document.activeElement;
-      const interacting = !!(active && active.matches && active.matches('[data-role="hub-dpi"], [data-role="hub-dpi-input"]'));
+      const interacting = !!(active && active.matches && active.matches('[data-role="hub-dpi"], [data-role="hub-dpi-input"], [data-mouse-setting]'));
       if (HUB_VIEWS.has(S.view) && !interacting) renderView();
     } else if (!silent) {
       showToast(res?.error || "读取外设状态失败", "error");
@@ -856,6 +965,109 @@
     if (HUB_VIEWS.has(S.view)) renderView();
   }
 
+  function gamepadMetaKey(gp) {
+    if (!gp) return "";
+    return [gp.connected, gp.link, gp.battery, gp.battery_label, gp.battery_note, gp.slot, gp.available].join("|");
+  }
+
+  function ensureGamepadPolling() {
+    if (S.gamepadTimer) { clearInterval(S.gamepadTimer); S.gamepadTimer = null; }
+    if (S.demo || !S.api || S.view !== "gamepad") return;
+    if (!S.gamepad && S.hub?.gamepad) S.gamepad = S.hub.gamepad;
+    loadGamepad();
+    S.gamepadTimer = setInterval(() => {
+      if (S.view === "gamepad" && !S.gamepadBusy) loadGamepad(true);
+    }, 60);
+  }
+
+  async function loadGamepad(silent = false) {
+    if (S.demo || !S.api) return;
+    S.gamepadBusy = true;
+    try {
+      const res = await apiCall("gamepad_state");
+      if (res?.ok && res.gamepad) {
+        const previous = S.gamepad;
+        S.gamepad = res.gamepad;
+        if (S.view === "gamepad") {
+          const changed = !previous || gamepadMetaKey(previous) !== gamepadMetaKey(res.gamepad);
+          if (changed) renderView();
+          else updateGamepadLive();
+        }
+      } else if (!silent) {
+        showToast(res?.error || "读取手柄状态失败", "error");
+      }
+    } catch (err) {
+      if (!silent) showToast("读取手柄状态失败", "error");
+    } finally {
+      S.gamepadBusy = false;
+    }
+  }
+
+  async function gamepadAction(action, payload) {
+    S.gamepadBusy = true;
+    try {
+      const res = await apiCall("gamepad_action", action, payload);
+      if (res?.ok && res.gamepad) {
+        S.gamepad = res.gamepad;
+        S.gamepadMetaKey = gamepadMetaKey(res.gamepad);
+      }
+      if (!res?.ok) showToast(res?.error || "手柄操作失败", "error");
+    } catch (err) {
+      showToast("手柄操作失败", "error");
+    } finally {
+      S.gamepadBusy = false;
+    }
+    if (S.view === "gamepad") updateGamepadLive();
+  }
+
+  function updateStickDot(selector, stick) {
+    const dot = $(selector);
+    if (!dot) return;
+    const x = Number(stick?.x || 0);
+    const y = Number(stick?.y || 0);
+    const max = 43;
+    dot.style.transform = `translate(${(x / 32767) * max}px, ${(-y / 32767) * max}px)`;
+    dot.classList.toggle("active", Math.abs(x) > 3500 || Math.abs(y) > 3500);
+  }
+
+  function updateGamepadLive() {
+    const gp = S.gamepad;
+    if (!gp) return;
+    const chip = $("#gp-status");
+    if (chip) {
+      chip.textContent = gp.connected ? "已连接" : "未连接";
+      chip.classList.toggle("accent", !!gp.connected);
+    }
+    const buttons = gp.buttons || {};
+    $$("[data-gp-btn]").forEach((el) => {
+      el.classList.toggle("active", !!buttons[el.dataset.gpBtn]);
+    });
+    const triggers = gp.triggers || {};
+    const lt = Number(triggers.left || 0);
+    const rt = Number(triggers.right || 0);
+    const ltBar = $("#gp-lt-bar");
+    const rtBar = $("#gp-rt-bar");
+    const ltVal = $("#gp-lt-val");
+    const rtVal = $("#gp-rt-val");
+    if (ltBar) ltBar.style.width = `${Math.max(2, Math.round((lt / 255) * 100))}%`;
+    if (rtBar) rtBar.style.width = `${Math.max(2, Math.round((rt / 255) * 100))}%`;
+    if (ltVal) ltVal.textContent = String(lt);
+    if (rtVal) rtVal.textContent = String(rt);
+    updateStickDot("#gp-dot-l", gp.sticks?.left);
+    updateStickDot("#gp-dot-r", gp.sticks?.right);
+    const leftVal = $("#gp-stick-l-val");
+    const rightVal = $("#gp-stick-r-val");
+    if (leftVal) leftVal.textContent = `${gp.sticks?.left?.x ?? 0}, ${gp.sticks?.left?.y ?? 0}`;
+    if (rightVal) rightVal.textContent = `${gp.sticks?.right?.x ?? 0}, ${gp.sticks?.right?.y ?? 0}`;
+    const packet = $("#gp-packet");
+    if (packet) packet.textContent = gp.connected ? String(gp.packet ?? "—") : "—";
+    const active = $("#gp-active");
+    if (active) {
+      const labels = (gp.buttons_down || []).map((name) => GAMEPAD_BUTTON_LABELS[name] || name);
+      active.textContent = labels.length ? labels.join(" · ") : "无按键按下";
+    }
+  }
+
   function renderView() {
     if (!S.config) return;
     const host = $("#view-inner");
@@ -865,6 +1077,7 @@
     else if (S.view === "keypad") html = renderKeypad();
     else if (S.view === "keyboard") html = renderKeyboard();
     else if (S.view === "mouse") html = renderMouse();
+    else if (S.view === "gamepad") html = renderGamepad();
     else if (S.view === "actions") html = renderActions();
     else if (S.view === "profiles") html = renderProfiles();
     else if (S.view === "device") html = renderDevice();
@@ -891,16 +1104,23 @@
     const connected = !!S.device?.connected;
     const kb = S.hub?.keyboard || {};
     const ms = S.hub?.mouse || {};
+    const gp = S.hub?.gamepad || S.gamepad || {};
     const kbOnline = !!kb.connected;
     const kbOk = kbOnline && kb.battery != null;
     const msOnline = !!ms.connected;
     const msOk = msOnline && ms.battery != null;
+    const gpOnline = !!gp.connected;
     const rate = (ms.rates || []).find((r) => r.code === ms.report_rate_code);
     const stage = (ms.stages || []).find((s) => s.index === ms.current_stage) || (ms.stages || [])[0];
     const reading = !S.hub;
-    const online = [connected, kbOnline, msOnline].filter(Boolean).length;
+    const online = [connected, kbOnline, msOnline, gpOnline].filter(Boolean).length;
+    const gpBattery = gp.battery != null ? `${gp.battery}<small>%</small>` : gpOnline ? "在线" : "—";
+    const gpNote = gp.battery != null
+      ? (gp.charging ? "正在充电" : "XInput 电量")
+      : (gp.battery_label || "XInput 状态");
+    const gpInput = gpOnline ? `XInput · slot ${gp.slot ?? "—"}` : "等待连接";
 
-    const keypadCard = `<button class="overview-card" data-nav="keypad">
+    const keypadCard = `<button class="overview-card" data-nav="keypad" style="--card-accent:#8b5cf6;--card-index:0">
       <div class="overview-top">
         <div class="overview-orb">${ico("usb", 26)}</div>
         <span class="chip ${connected ? "accent" : ""}">${connected ? "已连接" : "未连接"}</span>
@@ -916,7 +1136,7 @@
       <div class="overview-foot"><span>按键与图层设置</span>${ico("arrowRight", 15)}</div>
     </button>`;
 
-    const keyboardCard = `<button class="overview-card" data-nav="keyboard">
+    const keyboardCard = `<button class="overview-card" data-nav="keyboard" style="--card-accent:#38bdf8;--card-index:1">
       <div class="overview-top">
         <div class="overview-orb">${ico("keyboard", 26)}</div>
         <span class="chip ${kbOk ? "accent" : ""}">${reading ? "读取中" : kbOk ? "已连接" : kbOnline ? "读取失败" : "离线"}</span>
@@ -924,7 +1144,7 @@
       <div class="overview-name">${esc(kb.model || "新盟 M75")}</div>
       <div class="overview-model">2.4G 无线键盘</div>
       <div class="overview-value">${kbOk ? `${kb.battery}<small>%</small>` : "—"} <small>${kb.charging ? "正在充电" : "剩余电量"}</small></div>
-      ${kbOk ? `<div class="hub-bar" style="margin-top:10px"><i style="width:${Math.max(2, Math.min(100, Number(kb.battery)))}%;background:${batteryTone(Number(kb.battery))}"></i></div>` : ""}
+      ${kbOk ? `<div class="overview-meter"><i style="width:${Math.max(2, Math.min(100, Number(kb.battery)))}%;background:${batteryTone(Number(kb.battery))}"></i></div>` : `<div class="overview-idle">${reading ? "正在读取电量…" : "未读取到电量"}</div>`}
       <div class="overview-rows">
         <div class="overview-row"><span>连接方式</span><strong>2.4G 接收器</strong></div>
         <div class="overview-row"><span>状态</span><strong>${reading ? "正在读取…" : kbOk ? esc(kb.link || "2.4G") + " 已连接" : kbOnline ? "接收器在线" : "未找到接收器"}</strong></div>
@@ -932,7 +1152,7 @@
       <div class="overview-foot"><span>查看电量</span>${ico("arrowRight", 15)}</div>
     </button>`;
 
-    const mouseCard = `<button class="overview-card" data-nav="mouse">
+    const mouseCard = `<button class="overview-card" data-nav="mouse" style="--card-accent:#a78bfa;--card-index:2">
       <div class="overview-top">
         <div class="overview-orb">${ico("mouse", 26)}</div>
         <span class="chip ${msOk ? "accent" : ""}">${reading ? "读取中" : msOk ? "已连接" : msOnline ? "读取失败" : "离线"}</span>
@@ -940,7 +1160,7 @@
       <div class="overview-name">${esc(ms.model || "AUSDOM G04 Ultra")}</div>
       <div class="overview-model">${ms.wireless === false ? "有线鼠标" : "2.4G 无线鼠标"}</div>
       <div class="overview-value">${msOk ? `${ms.battery}<small>%</small>` : "—"} <small>${ms.charging ? "正在充电" : "剩余电量"}</small></div>
-      ${msOk ? `<div class="hub-bar" style="margin-top:10px"><i style="width:${Math.max(2, Math.min(100, Number(ms.battery)))}%;background:${batteryTone(Number(ms.battery))}"></i></div>` : ""}
+      ${msOk ? `<div class="overview-meter"><i style="width:${Math.max(2, Math.min(100, Number(ms.battery)))}%;background:${batteryTone(Number(ms.battery))}"></i></div>` : `<div class="overview-idle">${reading ? "正在读取配置…" : "未读取到鼠标"}</div>`}
       <div class="overview-rows">
         <div class="overview-row"><span>回报率</span><strong>${msOk && rate ? `${esc(rate.label)} Hz` : "—"}</strong></div>
         <div class="overview-row"><span>当前 DPI</span><strong>${msOk && stage ? `${stage.dpi} · 第 ${Number(ms.current_stage) + 1} 档` : "—"}</strong></div>
@@ -948,15 +1168,39 @@
       <div class="overview-foot"><span>DPI 与回报率</span>${ico("arrowRight", 15)}</div>
     </button>`;
 
+    const gamepadCard = `<button class="overview-card" data-nav="gamepad" style="--card-accent:#fb923c;--card-index:3">
+      <div class="overview-top">
+        <div class="overview-orb">${ico("gamepad", 26)}</div>
+        <span class="chip ${gpOnline ? "accent" : ""}">${reading ? "读取中" : gpOnline ? "已连接" : "离线"}</span>
+      </div>
+      <div class="overview-name">BIGBIG WON Rainbow 2 SE</div>
+      <div class="overview-model">XInput 无线手柄</div>
+      <div class="overview-value">${gpBattery} <small>${gpNote}</small></div>
+      ${gp.battery != null ? `<div class="overview-meter"><i style="width:${Math.max(2, Math.min(100, Number(gp.battery)))}%;background:${batteryTone(Number(gp.battery))}"></i></div>` : `<div class="overview-idle">${reading ? "正在查询手柄…" : gpOnline ? "实时输入与震动可用" : "打开手柄电源后重试"}</div>`}
+      <div class="overview-rows">
+        <div class="overview-row"><span>连接方式</span><strong>${esc(gp.link || "—")}</strong></div>
+        <div class="overview-row"><span>电量状态</span><strong>${esc(gp.battery_label || gp.battery_note || "—")}</strong></div>
+        <div class="overview-row"><span>输入通道</span><strong>${esc(gpInput)}</strong></div>
+      </div>
+      <div class="overview-foot"><span>实时测试与震动</span>${ico("arrowRight", 15)}</div>
+    </button>`;
+
     return `
       <div class="overview-head">
         <div>
-          <h1>设备总览</h1>
-          <p>点击卡片进入对应外设的控制页面${S.hub ? ` · ${online} / 3 台设备在线` : " · 正在读取外设…"}</p>
+          <div class="eyebrow">设备中枢 · KEYPAD STUDIO</div>
+          <h1>所有外设，一屏掌握</h1>
+          <p>点击设备卡片进入控制页面${S.hub ? ` · <strong>${online} / 4</strong> 台设备在线` : " · 正在读取外设…"}</p>
         </div>
         <button class="btn" data-action="hub-refresh">${ico("refresh", 15)} 重新扫描</button>
       </div>
-      <div class="overview-grid">${keypadCard}${keyboardCard}${mouseCard}</div>
+      <div class="overview-summary">
+        <div class="summary-cell"><div class="summary-icon">${ico("devices", 18)}</div><div><strong>${online}<span> / 4</span></strong><small>在线设备</small></div></div>
+        <div class="summary-cell"><div class="summary-icon">${ico("layers", 18)}</div><div><strong>${esc(profile?.name || "—")}</strong><small>当前配置 · ${esc(layers[layerIndex]?.name || "—")}</small></div></div>
+        <div class="summary-cell"><div class="summary-icon">${ico("bolt", 18)}</div><div><strong>${S.triggerCount}<span> 次</span></strong><small>本次运行触发</small></div></div>
+        <div class="summary-cell"><div class="summary-icon">${ico("activity", 18)}</div><div><strong>${gpOnline ? "手柄在线" : "等待手柄"}</strong><small>${gpOnline ? "实时输入已就绪" : "XInput 未检测到设备"}</small></div></div>
+      </div>
+      <div class="overview-grid">${keypadCard}${keyboardCard}${mouseCard}${gamepadCard}</div>
     `;
   }
 
@@ -1258,6 +1502,42 @@
       </button>`).join("");
     const activeStage = (ms.stages || []).find((s) => s.index === ms.current_stage) || (ms.stages || [])[0];
     const dpiValue = activeStage ? activeStage.dpi : ms.dpi_min || 50;
+    const cfg = ms.config || {};
+    const opts = ms.options || {};
+    const choose = (items, current) => (items || []).map((item) => `<option value="${item.value}" ${Number(current) === Number(item.value) ? "selected" : ""}>${esc(item.label)}</option>`).join("");
+    const debounceOptions = Array.from({ length: (opts.debounce_max || 15) + 1 }, (_, msDelay) => `<option value="${msDelay}" ${Number(cfg.key_debounce_time) === msDelay ? "selected" : ""}>${msDelay} ms</option>`).join("");
+    const sensorPanel = msOk && ms.config ? `
+      <div class="page-section mouse-settings">
+        <div class="hub-section-title">传感器与按键</div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">静默高度 LOD</div><div class="setting-desc">抬起鼠标时的有效高度，越低越早停止追踪。</div></div>
+          <select class="select" data-mouse-setting="silent_height">${choose(opts.lod, cfg.silent_height)}</select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">轨迹同步</div><div class="setting-desc">让传感器采样与移动轨迹对齐，提升移动准确性。</div></div>
+          <label class="switch"><input type="checkbox" data-mouse-setting="motion_sync_enable" ${cfg.motion_sync_enable ? "checked" : ""}><span></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">直线修正</div><div class="setting-desc">修正直线移动时的横向抖动，适合办公与绘图。</div></div>
+          <label class="switch"><input type="checkbox" data-mouse-setting="linear_correction_enable" ${cfg.linear_correction_enable ? "checked" : ""}><span></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">波纹控制</div><div class="setting-desc">高速移动时的算法修正，消除波浪状抖动。</div></div>
+          <select class="select" data-mouse-setting="ripple_control_option">${choose(opts.ripple, cfg.ripple_control_option)}</select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">传感器省电</div><div class="setting-desc">开启后降低传感器功耗；关闭可保持更高性能。</div></div>
+          <label class="switch"><input type="checkbox" data-mouse-setting="sensor_power_saving_enable" ${cfg.sensor_power_saving_enable ? "checked" : ""}><span></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">休眠时间</div><div class="setting-desc">鼠标静止一段时间后进入休眠，降低耗电。</div></div>
+          <select class="select" data-mouse-setting="sleep_time">${choose(opts.sleep, cfg.sleep_time)}</select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-main"><div class="setting-name">按键去抖</div><div class="setting-desc">提高防抖延迟可增强按键稳定性，0 - ${opts.debounce_max || 15} ms。</div></div>
+          <select class="select" data-mouse-setting="key_debounce_time">${debounceOptions}</select>
+        </div>
+      </div>` : "";
     const dpiPanel = msOk && activeStage ? `
       <div class="page-section">
         <div class="hub-section-title">DPI 档位 · 点击切换当前档位</div>
@@ -1293,7 +1573,145 @@
           <div class="hub-chips">${rateButtons}</div>
         </div>` : ""}
         ${dpiPanel}
-        <div class="hub-note">回报率与 DPI 会立即写入鼠标，设置保存在接收器中。</div>
+        ${sensorPanel}
+        <div class="hub-note">回报率、DPI 与传感器设置会立即写入鼠标，保存在接收器中。切换设置后请稍等片刻再继续操作。</div>
+      </div>`;
+  }
+
+  function renderGamepad() {
+    const gp = S.gamepad || S.hub?.gamepad || null;
+    if (!gp) return hubReading("正在连接手柄", "正在查询 XInput 手柄状态…");
+    const connected = !!gp.connected;
+    const battery = gp.battery;
+    const batteryKnown = battery != null;
+    const buttons = gp.buttons || {};
+    const down = (name) => (buttons[name] ? " active" : "");
+    const lt = Number(gp.triggers?.left || 0);
+    const rt = Number(gp.triggers?.right || 0);
+    const lx = Number(gp.sticks?.left?.x || 0);
+    const ly = Number(gp.sticks?.left?.y || 0);
+    const rx = Number(gp.sticks?.right?.x || 0);
+    const ry = Number(gp.sticks?.right?.y || 0);
+    const dotStyle = (x, y) => `transform:translate(${(x / 32767) * 43}px, ${(-y / 32767) * 43}px)`;
+    const disabled = connected ? "" : " disabled";
+    const batteryBlock = batteryKnown ? `
+      <div class="gp-power">
+        <div class="gp-power-value" style="color:${batteryTone(Number(battery))}">${battery}<span>%</span></div>
+        <div class="gp-power-main">
+          <div class="gp-power-title">${gp.charging ? "正在充电" : "手柄电量"}</div>
+          <div class="gp-power-note">${esc(gp.battery_note || "XInput 电量等级换算，仅供参考")}</div>
+        </div>
+        <div class="gp-bar"><i style="width:${Math.max(2, Math.min(100, Number(battery)))}%;background:${batteryTone(Number(battery))}"></i></div>
+      </div>` : `
+      <div class="gp-power gp-power--unknown">
+        <div class="gp-power-icon">${ico(connected ? "charging" : "battery", 24)}</div>
+        <div class="gp-power-main">
+          <div class="gp-power-title">${esc(gp.battery_label || (connected ? "手柄已连接" : "未检测到手柄"))}</div>
+          <div class="gp-power-note">${esc(gp.battery_note || gp.error || "XInput 未提供电量百分比")}</div>
+        </div>
+        <span class="chip ${connected ? "accent" : ""}">${connected ? "实时在线" : "离线"}</span>
+      </div>`;
+
+    return `
+      <div class="toolbar">
+        <span class="chip ${connected ? "accent" : ""}" id="gp-status">${connected ? "已连接" : "未连接"}</span>
+        <div class="spacer"></div>
+        <button class="btn" data-action="gp-refresh">${ico("refresh", 15)} 重新检测</button>
+      </div>
+      <div class="panel device-page gp-page">
+        <div class="hub-head gp-head">
+          <div class="hub-orb gp-orb">${ico("gamepad", 26)}</div>
+          <div class="hub-main">
+            <div class="hub-name">BIGBIG WON Rainbow 2 SE</div>
+            <div class="hub-sub">${connected ? `${esc(gp.link || "XInput")} · 实时输入已就绪` : "未检测到 XInput 手柄，请打开手柄电源"}</div>
+          </div>
+          <div class="gp-slot ${connected ? "on" : ""}">${connected ? `SLOT ${gp.slot ?? "—"}` : "OFFLINE"}</div>
+        </div>
+        ${batteryBlock}
+        <div class="gp-facts">
+          <div class="gp-fact"><span>连接方式</span><strong>${esc(gp.link || "—")}</strong></div>
+          <div class="gp-fact"><span>输入通道</span><strong>${connected ? `XInput · slot ${gp.slot ?? "—"}` : "—"}</strong></div>
+          <div class="gp-fact"><span>电量来源</span><strong>${esc(gp.battery_label || (connected ? "XInput" : "—"))}</strong></div>
+          <div class="gp-fact"><span>数据包</span><strong class="mono" id="gp-packet">${connected ? (gp.packet ?? "—") : "—"}</strong></div>
+        </div>
+        <div class="divider"></div>
+        <div class="gp-tester">
+          <div class="gp-tester-head">
+            <span class="hub-section-title">实时输入测试</span>
+            <span class="gp-active" id="gp-active">${(gp.buttons_down || []).length ? esc((gp.buttons_down || []).map((name) => GAMEPAD_BUTTON_LABELS[name] || name).join(" · ")) : "无按键按下"}</span>
+          </div>
+          <div class="gp-layout">
+            <div class="gp-side">
+              <div class="gp-stick-wrap">
+                <div class="gp-stick">
+                  <span class="gp-stick-ring"></span>
+                  <i class="gp-stick-dot" id="gp-dot-l" style="${dotStyle(lx, ly)}"></i>
+                  <span class="gp-stick-tag">L</span>
+                </div>
+                <div class="gp-axis mono" id="gp-stick-l-val">${lx}, ${ly}</div>
+              </div>
+              <div class="gp-cross">
+                <span class="gp-btn gp-dpad gp-up${down("up")}" data-gp-btn="up">${ico("chevronUp", 15)}</span>
+                <span class="gp-btn gp-dpad gp-left${down("left")}" data-gp-btn="left">${ico("chevronRight", 15, "flip")}</span>
+                <span class="gp-cross-center"></span>
+                <span class="gp-btn gp-dpad gp-right${down("right")}" data-gp-btn="right">${ico("chevronRight", 15)}</span>
+                <span class="gp-btn gp-dpad gp-down${down("down")}" data-gp-btn="down">${ico("chevronDown", 15)}</span>
+              </div>
+            </div>
+            <div class="gp-center">
+              <div class="gp-triggers">
+                <div class="gp-trigger">
+                  <div class="gp-trigger-head"><span>LT</span><strong class="mono" id="gp-lt-val">${lt}</strong></div>
+                  <div class="gp-trigger-track"><i id="gp-lt-bar" style="width:${Math.max(2, Math.round((lt / 255) * 100))}%"></i></div>
+                </div>
+                <div class="gp-trigger">
+                  <div class="gp-trigger-head"><span>RT</span><strong class="mono" id="gp-rt-val">${rt}</strong></div>
+                  <div class="gp-trigger-track"><i id="gp-rt-bar" style="width:${Math.max(2, Math.round((rt / 255) * 100))}%"></i></div>
+                </div>
+              </div>
+              <div class="gp-bumpers">
+                <span class="gp-btn gp-bumper${down("lb")}" data-gp-btn="lb">LB</span>
+                <span class="gp-btn gp-bumper${down("rb")}" data-gp-btn="rb">RB</span>
+              </div>
+              <div class="gp-face">
+                <span class="gp-btn gp-face-btn gp-face-y${down("y")}" data-gp-btn="y">Y</span>
+                <span class="gp-btn gp-face-btn gp-face-x${down("x")}" data-gp-btn="x">X</span>
+                <span class="gp-btn gp-face-btn gp-face-b${down("b")}" data-gp-btn="b">B</span>
+                <span class="gp-btn gp-face-btn gp-face-a${down("a")}" data-gp-btn="a">A</span>
+              </div>
+              <div class="gp-system">
+                <span class="gp-btn gp-pill${down("back")}" data-gp-btn="back">${ico("window", 13)} 视图</span>
+                <span class="gp-btn gp-pill${down("start")}" data-gp-btn="start">${ico("list", 13)} 菜单</span>
+              </div>
+            </div>
+            <div class="gp-side">
+              <div class="gp-stick-wrap">
+                <div class="gp-stick">
+                  <span class="gp-stick-ring"></span>
+                  <i class="gp-stick-dot" id="gp-dot-r" style="${dotStyle(rx, ry)}"></i>
+                  <span class="gp-stick-tag">R</span>
+                </div>
+                <div class="gp-axis mono" id="gp-stick-r-val">${rx}, ${ry}</div>
+              </div>
+              <div class="gp-stick-extra">
+                <span class="gp-btn gp-pill${down("l3")}" data-gp-btn="l3">L3 按下</span>
+                <span class="gp-btn gp-pill${down("r3")}" data-gp-btn="r3">R3 按下</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gp-vibrate-panel">
+          <div class="gp-vibrate-copy">
+            <div class="hub-section-title">震动测试</div>
+            <p>通过 XInput 直接驱动手柄的左右马达，用来确认连接正常。震动会在设定时间后自动停止。</p>
+          </div>
+          <div class="gp-vibrate-actions">
+            <button class="btn" data-action="gp-vibrate" data-strength="light"${disabled}>${ico("vibrate", 15)} 轻震</button>
+            <button class="btn primary" data-action="gp-vibrate" data-strength="strong"${disabled}>${ico("vibrate", 15)} 强震</button>
+            <button class="btn" data-action="gp-stop"${disabled}>停止</button>
+          </div>
+        </div>
+        <div class="hub-note">XInput 提供实时按键、摇杆、扳机、震动和粗粒度电量。按键重映射、体感、宏、灯效与固件升级依赖厂商私有协议，本版本尚未接入，也不会修改手柄固件。</div>
       </div>`;
   }
 
