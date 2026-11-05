@@ -10,7 +10,7 @@
     device: null,
     runtime: null,
     meta: null,
-    view: "home",
+    view: "overview",
     polling: false,
     saveTimer: null,
     recent: [],
@@ -46,8 +46,18 @@
     none: "#64748b",
   };
 
-  const RAIL_ICON = { home: "home", actions: "grid", profiles: "layers", device: "usb", hub: "devices", settings: "settings" };
-  const VIEW_TITLE = { home: "按键布局", actions: "动作库", profiles: "配置", device: "设备", hub: "外设中心", settings: "设置" };
+  const TOP_ICON = { actions: "grid", profiles: "layers", settings: "settings" };
+  const VIEW_TITLE = {
+    overview: "设备总览",
+    keypad: "小键盘",
+    keyboard: "新盟 M75 键盘",
+    mouse: "AUSDOM G04 Ultra 鼠标",
+    device: "设备诊断",
+    actions: "动作库",
+    profiles: "配置",
+    settings: "设置",
+  };
+  const HUB_VIEWS = new Set(["overview", "keyboard", "mouse"]);
 
   // ------------------------------------------------------------------
   // Helpers
@@ -255,11 +265,12 @@
   // ------------------------------------------------------------------
 
   function boot() {
-    // rail icons
-    $$(".rail-btn[data-nav]").forEach((btn) => {
-      btn.innerHTML = ico(RAIL_ICON[btn.dataset.nav] || "bolt", 20);
+    // topbar icons
+    $$(".top-nav-btn[data-nav]").forEach((btn) => {
+      btn.innerHTML = ico(TOP_ICON[btn.dataset.nav] || "bolt", 18);
     });
-    $("#theme-toggle").innerHTML = ico("sun", 19);
+    $("#back-btn").innerHTML = ico("arrowLeft", 18);
+    $("#theme-toggle").innerHTML = ico("sun", 18);
     const loading = $("#loading-icon");
     if (loading) loading.innerHTML = ico("sparkles", 26);
     bindGlobalEvents();
@@ -286,9 +297,38 @@
     }
   }
 
+  function demoHub() {
+    return {
+      keyboard: { connected: true, model: "新盟 M75", link: "2.4G", battery: 82, charging: false },
+      mouse: {
+        connected: true,
+        model: "AUSDOM G04 Ultra",
+        link: "2.4G",
+        wireless: true,
+        battery: 64,
+        charging: false,
+        report_rate_code: 1,
+        rates: [
+          { label: "8000", code: 64 }, { label: "4000", code: 32 }, { label: "2000", code: 16 },
+          { label: "1000", code: 1 }, { label: "500", code: 2 }, { label: "250", code: 4 },
+        ],
+        stages: [
+          { index: 0, dpi: 800, color: "#38bdf8" },
+          { index: 1, dpi: 1600, color: "#a78bfa" },
+          { index: 2, dpi: 3200, color: "#fbbf24" },
+        ],
+        current_stage: 1,
+        dpi_min: 50,
+        dpi_max: 42000,
+        dpi_step: 50,
+      },
+    };
+  }
+
   function initDemo() {
     if (S.ready) return;
     S.demo = true;
+    S.hub = demoHub();
     S.api = {
       async get_state() { return demoState(); },
       async save_config(config) { return { ok: true, config }; },
@@ -296,6 +336,8 @@
       async set_active_profile(id) { S.config.settings.activeProfile = id; S.config.settings.activeLayer = 0; return { ok: true }; },
       async set_active_layer(i) { S.config.settings.activeLayer = i; return { ok: true }; },
       async device_action() { return { ok: true }; },
+      async hub_state() { return { ok: true, hub: demoHub() }; },
+      async hub_action() { return { ok: true, hub: demoHub() }; },
       async test_action() { return { ok: true }; },
       async poll_events() { return []; },
       async set_autostart(v) { S.config.settings.autostart = v; return { ok: true }; },
@@ -321,12 +363,13 @@
     S.runtime = data.runtime || {};
     S.meta = data.meta;
     if (!S.booted) {
-      S.view = "home";
+      S.view = "overview";
       S.booted = true;
     }
     document.documentElement.dataset.theme = S.config.settings.theme || "dark";
     updateThemeIcon();
     renderAll();
+    if (!S.demo && HUB_VIEWS.has(S.view)) ensureHubPolling();
   }
 
   function startPolling() {
@@ -355,12 +398,12 @@
         S.triggerCount += 1;
         S.recent.unshift({ slot: event.slot, name: event.actionName || "动作", ts: event.ts || Date.now() / 1000, double: event.doubleFired, type: event.actionType, icon: event.actionIcon });
         S.recent = S.recent.slice(0, 8);
-        if (!S.editing && (S.view === "home")) renderView();
+        if (!S.editing && S.view === "keypad") renderView();
         break;
       case "device":
         S.device = event.device || S.device;
         updateTopbar();
-        if (!S.editing && (S.view === "home" || S.view === "device")) renderView();
+        if (!S.editing && (S.view === "keypad" || S.view === "overview" || S.view === "device")) renderView();
         break;
       case "layer":
         S.config.settings.activeLayer = event.layer;
@@ -424,6 +467,9 @@
     switch (action) {
       case "modal-backdrop":
         closeModal();
+        break;
+      case "go-back":
+        setView(S.view === "device" ? "keypad" : "overview");
         break;
       case "toggle-theme":
         toggleTheme();
@@ -763,12 +809,8 @@
     $("#profile-name").textContent = profile?.name || "未选择配置";
     $("#profile-dot").style.background = profile?.color || "#8b5cf6";
     $("#profile-dot").style.color = profile?.color || "#8b5cf6";
-    const status = $("#device-status");
-    const text = $("#device-status-text");
-    status.classList.toggle("online", !!S.device?.connected);
-    status.classList.toggle("offline", !S.device?.connected);
-    text.textContent = S.device?.connected ? `已连接 · v${S.device.firmware || "?"}` : "设备未连接";
-    $$(".rail-btn[data-nav]").forEach((btn) => btn.classList.toggle("active", btn.dataset.nav === S.view));
+    $$(".top-nav-btn[data-nav]").forEach((btn) => btn.classList.toggle("active", btn.dataset.nav === S.view));
+    $("#back-btn").classList.toggle("hidden", S.view === "overview");
     $("#crumb-title").textContent = VIEW_TITLE[S.view] || "";
   }
 
@@ -777,13 +819,16 @@
     renderView();
     const viewEl = $(".view");
     if (viewEl) viewEl.scrollTop = 0;
+    ensureHubPolling();
+  }
+
+  function ensureHubPolling() {
     if (S.hubTimer) { clearInterval(S.hubTimer); S.hubTimer = null; }
-    if (view === "hub" && !S.demo) {
-      loadHub();
-      S.hubTimer = setInterval(() => {
-        if (S.view === "hub" && !S.hubBusy) loadHub(true);
-      }, 12000);
-    }
+    if (S.demo || !HUB_VIEWS.has(S.view)) return;
+    loadHub();
+    S.hubTimer = setInterval(() => {
+      if (HUB_VIEWS.has(S.view) && !S.hubBusy) loadHub(true);
+    }, 12000);
   }
 
   async function loadHub(silent = false) {
@@ -793,7 +838,7 @@
       S.hub = res.hub;
       const active = document.activeElement;
       const interacting = !!(active && active.matches && active.matches('[data-role="hub-dpi"], [data-role="hub-dpi-input"]'));
-      if (S.view === "hub" && !interacting) renderView();
+      if (HUB_VIEWS.has(S.view) && !interacting) renderView();
     } else if (!silent) {
       showToast(res?.error || "读取外设状态失败", "error");
     }
@@ -808,7 +853,7 @@
     } finally {
       S.hubBusy = false;
     }
-    if (S.view === "hub") renderView();
+    if (HUB_VIEWS.has(S.view)) renderView();
   }
 
   function renderView() {
@@ -816,17 +861,16 @@
     const host = $("#view-inner");
     const scroll = $(".view")?.scrollTop || 0;
     let html = "";
-    if (S.view === "home") html = renderHome();
+    if (S.view === "overview") html = renderOverview();
+    else if (S.view === "keypad") html = renderKeypad();
+    else if (S.view === "keyboard") html = renderKeyboard();
+    else if (S.view === "mouse") html = renderMouse();
     else if (S.view === "actions") html = renderActions();
     else if (S.view === "profiles") html = renderProfiles();
     else if (S.view === "device") html = renderDevice();
-    else if (S.view === "hub") html = renderHub();
     else if (S.view === "settings") html = renderSettings();
     host.innerHTML = html;
     updateTopbar();
-    if (S.view === "home" && !S.demo) {
-      // nothing
-    }
     const view = $(".view");
     if (view) view.scrollTop = scroll;
     if (S.view === "device" && !S.demo) fetchDeviceLog().then(() => {
@@ -836,10 +880,91 @@
   }
 
   // ------------------------------------------------------------------
-  // Rendering: home
+  // Rendering: overview
   // ------------------------------------------------------------------
 
-  function renderHome() {
+  function renderOverview() {
+    const profile = currentProfile();
+    const layers = currentLayers();
+    const layerIndex = currentLayerIndex();
+    const bound = Object.values(currentLayer()?.keys || {}).filter((b) => b?.action).length;
+    const connected = !!S.device?.connected;
+    const kb = S.hub?.keyboard || {};
+    const ms = S.hub?.mouse || {};
+    const kbOnline = !!kb.connected;
+    const kbOk = kbOnline && kb.battery != null;
+    const msOnline = !!ms.connected;
+    const msOk = msOnline && ms.battery != null;
+    const rate = (ms.rates || []).find((r) => r.code === ms.report_rate_code);
+    const stage = (ms.stages || []).find((s) => s.index === ms.current_stage) || (ms.stages || [])[0];
+    const reading = !S.hub;
+    const online = [connected, kbOnline, msOnline].filter(Boolean).length;
+
+    const keypadCard = `<button class="overview-card" data-nav="keypad">
+      <div class="overview-top">
+        <div class="overview-orb">${ico("usb", 26)}</div>
+        <span class="chip ${connected ? "accent" : ""}">${connected ? "已连接" : "未连接"}</span>
+      </div>
+      <div class="overview-name">6 键小键盘</div>
+      <div class="overview-model">${esc(S.device?.model || "Single6VerticalAdvanced")}</div>
+      <div class="overview-value">${connected ? "在线" : "离线"} <small>${connected ? `固件 ${esc(S.device?.firmware || "—")}` : "请检查数据线"}</small></div>
+      <div class="overview-rows">
+        <div class="overview-row"><span>当前配置</span><strong>${esc(profile?.name || "—")} · ${esc(layers[layerIndex]?.name || "—")}</strong></div>
+        <div class="overview-row"><span>按键绑定</span><strong>${bound} / 6</strong></div>
+        <div class="overview-row"><span>本次触发</span><strong>${S.triggerCount} 次</strong></div>
+      </div>
+      <div class="overview-foot"><span>按键与图层设置</span>${ico("arrowRight", 15)}</div>
+    </button>`;
+
+    const keyboardCard = `<button class="overview-card" data-nav="keyboard">
+      <div class="overview-top">
+        <div class="overview-orb">${ico("keyboard", 26)}</div>
+        <span class="chip ${kbOk ? "accent" : ""}">${reading ? "读取中" : kbOk ? "已连接" : kbOnline ? "读取失败" : "离线"}</span>
+      </div>
+      <div class="overview-name">${esc(kb.model || "新盟 M75")}</div>
+      <div class="overview-model">2.4G 无线键盘</div>
+      <div class="overview-value">${kbOk ? `${kb.battery}<small>%</small>` : "—"} <small>${kb.charging ? "正在充电" : "剩余电量"}</small></div>
+      ${kbOk ? `<div class="hub-bar" style="margin-top:10px"><i style="width:${Math.max(2, Math.min(100, Number(kb.battery)))}%;background:${batteryTone(Number(kb.battery))}"></i></div>` : ""}
+      <div class="overview-rows">
+        <div class="overview-row"><span>连接方式</span><strong>2.4G 接收器</strong></div>
+        <div class="overview-row"><span>状态</span><strong>${reading ? "正在读取…" : kbOk ? esc(kb.link || "2.4G") + " 已连接" : kbOnline ? "接收器在线" : "未找到接收器"}</strong></div>
+      </div>
+      <div class="overview-foot"><span>查看电量</span>${ico("arrowRight", 15)}</div>
+    </button>`;
+
+    const mouseCard = `<button class="overview-card" data-nav="mouse">
+      <div class="overview-top">
+        <div class="overview-orb">${ico("mouse", 26)}</div>
+        <span class="chip ${msOk ? "accent" : ""}">${reading ? "读取中" : msOk ? "已连接" : msOnline ? "读取失败" : "离线"}</span>
+      </div>
+      <div class="overview-name">${esc(ms.model || "AUSDOM G04 Ultra")}</div>
+      <div class="overview-model">${ms.wireless === false ? "有线鼠标" : "2.4G 无线鼠标"}</div>
+      <div class="overview-value">${msOk ? `${ms.battery}<small>%</small>` : "—"} <small>${ms.charging ? "正在充电" : "剩余电量"}</small></div>
+      ${msOk ? `<div class="hub-bar" style="margin-top:10px"><i style="width:${Math.max(2, Math.min(100, Number(ms.battery)))}%;background:${batteryTone(Number(ms.battery))}"></i></div>` : ""}
+      <div class="overview-rows">
+        <div class="overview-row"><span>回报率</span><strong>${msOk && rate ? `${esc(rate.label)} Hz` : "—"}</strong></div>
+        <div class="overview-row"><span>当前 DPI</span><strong>${msOk && stage ? `${stage.dpi} · 第 ${Number(ms.current_stage) + 1} 档` : "—"}</strong></div>
+      </div>
+      <div class="overview-foot"><span>DPI 与回报率</span>${ico("arrowRight", 15)}</div>
+    </button>`;
+
+    return `
+      <div class="overview-head">
+        <div>
+          <h1>设备总览</h1>
+          <p>点击卡片进入对应外设的控制页面${S.hub ? ` · ${online} / 3 台设备在线` : " · 正在读取外设…"}</p>
+        </div>
+        <button class="btn" data-action="hub-refresh">${ico("refresh", 15)} 重新扫描</button>
+      </div>
+      <div class="overview-grid">${keypadCard}${keyboardCard}${mouseCard}</div>
+    `;
+  }
+
+  // ------------------------------------------------------------------
+  // Rendering: keypad
+  // ------------------------------------------------------------------
+
+  function renderKeypad() {
     const profile = currentProfile();
     const layers = currentLayers();
     const layerIndex = currentLayerIndex();
@@ -927,8 +1052,7 @@
           <div class="divider"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn small" data-nav="actions">${ico("grid", 14)} 动作库</button>
-            <button class="btn small" data-nav="device">${ico("usb", 14)} 设备</button>
-            <button class="btn small" data-nav="hub">${ico("devices", 14)} 外设中心</button>
+            <button class="btn small" data-nav="device">${ico("usb", 14)} 设备诊断</button>
             <button class="btn small" data-nav="settings">${ico("settings", 14)} 设置</button>
           </div>
         </div>
@@ -1089,34 +1213,45 @@
       <div class="hub-bar"><i style="width:${Math.max(2, Math.min(100, level))}%;background:${tone}"></i></div>`;
   }
 
-  function renderHub() {
-    const hub = S.hub;
-    if (S.demo) {
-      return `<div class="empty"><div class="empty-icon">${ico("devices", 20)}</div><h3>外设中心</h3><p>预览模式下无法访问 HID 设备。运行应用后即可查看键盘和鼠标状态。</p></div>`;
-    }
-    if (!hub) {
-      return `<div class="empty"><div class="empty-icon">${ico("devices", 20)}</div><h3>正在读取外设</h3><p>正在查询键盘与鼠标接收器…</p></div>`;
-    }
-    const kb = hub.keyboard || {};
-    const ms = hub.mouse || {};
+  function hubReading(title, text) {
+    return `<div class="empty"><div class="empty-icon">${ico("refresh", 20)}</div><h3>${esc(title)}</h3><p>${esc(text)}</p></div>`;
+  }
+
+  function renderKeyboard() {
+    if (!S.hub) return hubReading("正在读取键盘", "正在查询新盟 M75 的 2.4G 接收器…");
+    const kb = S.hub.keyboard || {};
     const kbOk = kb.connected && kb.battery != null;
-    const msOk = ms.connected && ms.battery != null;
     const kbOnline = !!kb.connected;
-    const msOnline = !!ms.connected;
-
-    const kbCard = `<div class="panel hub-card">
-      <div class="hub-head">
-        <div class="hub-orb">${ico("keyboard", 22)}</div>
-        <div class="hub-main">
-          <div class="hub-name">${esc(kb.model || "新盟 M75")}</div>
-          <div class="hub-sub">${kbOk ? esc(kb.link || "2.4G") + " 已连接" : kbOnline ? "接收器在线 · 读取失败" : "未找到 2.4G 接收器"}</div>
-        </div>
-        <span class="chip ${kbOk ? "accent" : ""}">${kbOk ? "已连接" : kbOnline ? "读取失败" : "离线"}</span>
+    return `
+      <div class="toolbar">
+        <span class="chip ${kbOk ? "accent" : ""}">${kbOk ? "已连接" : kbOnline ? "读取失败" : "未连接"}</span>
+        <div class="spacer"></div>
+        <button class="btn" data-action="hub-refresh">${ico("refresh", 15)} 重新读取</button>
       </div>
-      ${kbOk ? renderBattery(kb, "剩余电量") : `<div class="hub-note">${esc(kb.error || "请确认键盘的 2.4G 接收器已插入电脑。")}</div>`}
-      <div class="hub-note">键盘只读取电量，不会修改任何按键设置。</div>
-    </div>`;
+      <div class="panel device-page">
+        <div class="hub-head">
+          <div class="hub-orb">${ico("keyboard", 24)}</div>
+          <div class="hub-main">
+            <div class="hub-name">${esc(kb.model || "新盟 M75")}</div>
+            <div class="hub-sub">${kbOk ? esc(kb.link || "2.4G") + " 已连接" : kbOnline ? "接收器在线 · 读取失败" : "未找到 2.4G 接收器"}</div>
+          </div>
+        </div>
+        ${kbOk ? `<div class="page-battery">${renderBattery(kb, "剩余电量")}</div>` : `<div class="hub-note">${esc(kb.error || "请确认键盘的 2.4G 接收器已插入电脑，并打开键盘电源。")}</div>`}
+        <div class="divider"></div>
+        <div class="device-meta">
+          <div class="meta-cell"><div class="meta-label">连接方式</div><div class="meta-value">2.4G 接收器</div></div>
+          <div class="meta-cell"><div class="meta-label">读取内容</div><div class="meta-value">电量</div></div>
+          <div class="meta-cell"><div class="meta-label">按键设置</div><div class="meta-value">不修改</div></div>
+        </div>
+        <div class="hub-note">键盘只读取电量，不会修改任何按键设置。读取失败时请先按一下键盘再重试。</div>
+      </div>`;
+  }
 
+  function renderMouse() {
+    if (!S.hub) return hubReading("正在读取鼠标", "正在查询 AUSDOM G04 Ultra 的 2.4G 接收器…");
+    const ms = S.hub.mouse || {};
+    const msOk = ms.connected && ms.battery != null;
+    const msOnline = !!ms.connected;
     const rateButtons = (ms.rates || []).map((rate) => `<button class="hub-chip ${ms.report_rate_code === rate.code ? "active" : ""}" data-action="hub-rate" data-code="${rate.code}">${esc(rate.label)} Hz</button>`).join("");
     const stageButtons = (ms.stages || []).map((stage) => `<button class="hub-chip ${ms.current_stage === stage.index ? "active" : ""}" data-action="hub-stage" data-stage="${stage.index}">
         <i class="hub-dot" style="background:${esc(stage.color)}"></i>${stage.dpi}
@@ -1124,11 +1259,11 @@
     const activeStage = (ms.stages || []).find((s) => s.index === ms.current_stage) || (ms.stages || [])[0];
     const dpiValue = activeStage ? activeStage.dpi : ms.dpi_min || 50;
     const dpiPanel = msOk && activeStage ? `
-      <div>
+      <div class="page-section">
         <div class="hub-section-title">DPI 档位 · 点击切换当前档位</div>
         <div class="hub-chips">${stageButtons}</div>
       </div>
-      <div>
+      <div class="page-section">
         <div class="hub-section-title">当前档位 DPI · 松开滑块后写入鼠标</div>
         <div class="hub-dpi-row"><span class="hub-dpi-value" id="hub-dpi-value">${dpiValue} DPI</span></div>
         <input class="hub-range" type="range" data-role="hub-dpi" data-stage="${activeStage.index}" min="${ms.dpi_min || 50}" max="${ms.dpi_max || 42000}" step="${ms.dpi_step || 50}" value="${dpiValue}">
@@ -1138,30 +1273,28 @@
         </div>
       </div>` : "";
 
-    const msCard = `<div class="panel hub-card">
-      <div class="hub-head">
-        <div class="hub-orb">${ico("mouse", 22)}</div>
-        <div class="hub-main">
-          <div class="hub-name">${esc(ms.model || "AUSDOM G04 Ultra")}</div>
-          <div class="hub-sub">${msOk ? esc(ms.link || "2.4G") + " 已连接" : msOnline ? "接收器在线" : "未找到 2.4G 接收器"}</div>
-        </div>
-        <span class="chip ${msOk ? "accent" : ""}">${msOk ? "已连接" : msOnline ? "读取失败" : "离线"}</span>
-      </div>
-      ${msOk ? renderBattery(ms, "剩余电量") : `<div class="hub-note">${esc(ms.error || "请确认鼠标的 2.4G 接收器已插入电脑。")}</div>`}
-      ${msOk ? `<div>
-        <div class="hub-section-title">回报率 · ${ms.wireless ? "2.4G 无线" : "有线"}</div>
-        <div class="hub-chips">${rateButtons}</div>
-      </div>` : ""}
-      ${dpiPanel}
-      <div class="hub-note">回报率与 DPI 会立即写入鼠标，设置保存在接收器中。</div>
-    </div>`;
-
-    return `<div class="toolbar">
-        <span class="chip ${kbOk || msOk ? "accent" : ""}">${[kbOnline, msOnline].filter(Boolean).length} / 2 台外设在线</span>
+    return `
+      <div class="toolbar">
+        <span class="chip ${msOk ? "accent" : ""}">${msOk ? "已连接" : msOnline ? "读取失败" : "未连接"}</span>
         <div class="spacer"></div>
-        <button class="btn" data-action="hub-refresh">${ico("refresh", 15)} 重新扫描</button>
+        <button class="btn" data-action="hub-refresh">${ico("refresh", 15)} 重新读取</button>
       </div>
-      <div class="hub-grid">${kbCard}${msCard}</div>`;
+      <div class="panel device-page">
+        <div class="hub-head">
+          <div class="hub-orb">${ico("mouse", 24)}</div>
+          <div class="hub-main">
+            <div class="hub-name">${esc(ms.model || "AUSDOM G04 Ultra")}</div>
+            <div class="hub-sub">${msOk ? esc(ms.link || "2.4G") + " 已连接" : msOnline ? "接收器在线 · 读取失败" : "未找到 2.4G 接收器"}</div>
+          </div>
+        </div>
+        ${msOk ? `<div class="page-battery">${renderBattery(ms, "剩余电量")}</div>` : `<div class="hub-note">${esc(ms.error || "请确认鼠标的 2.4G 接收器已插入电脑，并打开鼠标电源。")}</div>`}
+        ${msOk ? `<div class="page-section">
+          <div class="hub-section-title">回报率 · ${ms.wireless ? "2.4G 无线" : "有线"}</div>
+          <div class="hub-chips">${rateButtons}</div>
+        </div>` : ""}
+        ${dpiPanel}
+        <div class="hub-note">回报率与 DPI 会立即写入鼠标，设置保存在接收器中。</div>
+      </div>`;
   }
 
   function renderLogLines() {

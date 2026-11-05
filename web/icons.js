@@ -68,6 +68,7 @@
     eye: "eye",
     external: "external-link",
     arrowRight: "arrow-right",
+    arrowLeft: "arrow-left",
     crosshair: "crosshair",
     pause: "player-pause",
     palette: "palette",
