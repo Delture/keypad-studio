@@ -141,7 +141,11 @@ class Updater:
                 snapshot = dict(self.status)
             self._emit_event({"type": "update", "update": snapshot})
             if notify and available and asset:
-                self._emit_event({"type": "toast", "message": f"发现新版本 {latest}，可在「设置 → 软件更新」里安装", "kind": "info"})
+                if self.install_dir() is not None:
+                    message = f"发现新版本 {latest}，可在「设置 → 软件更新」里安装"
+                else:
+                    message = f"发现新版本 {latest}，源码运行请到发布页下载"
+                self._emit_event({"type": "toast", "message": message, "kind": "info"})
         except Exception as exc:
             self._set(phase="error", error=_error_message(exc))
         finally:
