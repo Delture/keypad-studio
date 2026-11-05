@@ -269,6 +269,9 @@ class Updater:
                 ["cmd.exe", "/c", str(script)],
                 cwd=str(stage),
                 creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 close_fds=True,
             )
         except Exception as exc:

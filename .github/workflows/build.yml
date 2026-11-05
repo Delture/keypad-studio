@@ -38,6 +38,9 @@ jobs:
           if ($version -ne $tag) { throw "VERSION $version does not match tag $tag" }
           Write-Host "Building version $version"
 
+      - name: Compile check
+        run: python -m compileall -q app.py backend
+
       - name: Build with PyInstaller
         run: python -m PyInstaller KeypadStudio.spec --noconfirm --clean
 

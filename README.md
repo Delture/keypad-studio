@@ -90,6 +90,7 @@ python -m venv .venv
 ## 构建
 
 ```powershell
+.venv\Scripts\python.exe -m pip install pyinstaller==6.22.3
 .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed `
   --name KeypadStudio --icon assets/icon.ico `
   --add-data "web;web" --add-data "assets;assets" `

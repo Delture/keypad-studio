@@ -1218,7 +1218,10 @@
       status = `检查失败：${esc(u.error || "未知错误")}`;
       action = `<button class="btn small" data-action="update-check">${ico("refresh", 13)} 重试</button>`;
     } else {
-      status = canInstall ? "启动时会自动检查更新，也可以手动检查。" : "源码运行模式，只能检查版本，不能自动安装。";
+      const auto = S.config.settings.autoCheckUpdate !== false;
+      status = !canInstall
+        ? "源码运行模式，只能检查版本，不能自动安装。"
+        : auto ? "启动时会自动检查更新，也可以手动检查。" : "自动检查已关闭，可以手动检查。";
       action = `<button class="btn small" data-action="update-check">${ico("refresh", 13)} 检查更新</button>`;
     }
 
