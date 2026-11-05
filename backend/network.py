@@ -227,8 +227,6 @@ def toggle_network_profile() -> Tuple[bool, str]:
     if not _clash_running():
         return False, "Clash Party 未运行"
     shortcuts = clash_shortcuts()
-    if not shortcuts["tun"] or not shortcuts["proxy"]:
-        return False, "Clash Party 未配置 TUN/系统代理快捷键，请重启 Clash Party 让快捷键生效"
 
     status = network_status()
     state_a = bool(status["isStateA"])
@@ -236,6 +234,8 @@ def toggle_network_profile() -> Tuple[bool, str]:
     def apply_tun(target: bool) -> Tuple[bool, str]:
         if _tun_adapter_up() == target:
             return True, ""
+        if not shortcuts["tun"]:
+            return False, "Clash Party 未配置 TUN 快捷键，请重启 Clash Party 让快捷键生效"
         ok, message = _send_shortcut(shortcuts["tun"])
         if not ok:
             return False, message
@@ -243,35 +243,42 @@ def toggle_network_profile() -> Tuple[bool, str]:
             return False, "TUN 模式切换超时，请检查 Clash Party 快捷键与管理员权限"
         return True, ""
 
-    def apply_proxy(target: bool) -> Tuple[bool, str]:
-        if system_proxy_enabled() == target:
+    def ensure_proxy_on() -> Tuple[bool, str]:
+        if system_proxy_enabled():
             return True, ""
+        if not shortcuts["proxy"]:
+            return False, "Clash Party 未配置系统代理快捷键，请重启 Clash Party 让快捷键生效"
         ok, message = _send_shortcut(shortcuts["proxy"])
         if not ok:
             return False, message
-        if not _wait_for(lambda: system_proxy_enabled() == target, 6):
+        if not _wait_for(system_proxy_enabled, 6):
             return False, "系统代理切换超时，请检查 Clash Party 快捷键"
         return True, ""
 
     if state_a:
-        ok, message = apply_tun(True)
-        if not ok:
-            return False, message
-        ok, message = apply_proxy(False)
-        if not ok:
-            return False, message
+        # Tailscale first so it never overlaps with the Clash TUN adapter.
         ok, message = set_tailscale(False)
         if not ok:
             return False, message
-        return True, "已切换：Tailscale 已断开 + Clash Party TUN 模式"
+        ok, message = apply_tun(True)
+        if not ok:
+            restored, _ = set_tailscale(True)
+            suffix = "（已恢复 Tailscale）" if restored else "（Tailscale 恢复失败，请手动连接）"
+            return False, message + suffix
+        ok, message = ensure_proxy_on()
+        if not ok:
+            return False, f"已切换到 TUN 模式，但系统代理未能开启：{message}"
+        return True, "已切换：Tailscale 已断开 + Clash Party TUN 模式（系统代理保持开启）"
 
-    ok, message = set_tailscale(True)
-    if not ok:
-        return False, message
-    ok, message = apply_proxy(True)
-    if not ok:
-        return False, message
     ok, message = apply_tun(False)
     if not ok:
         return False, message
-    return True, "已恢复：Tailscale 已连接 + Clash Party 普通代理"
+    ok, message = set_tailscale(True)
+    if not ok:
+        restored, _ = apply_tun(True)
+        suffix = "（已恢复 TUN 模式）" if restored else "（TUN 恢复失败，请手动开启）"
+        return False, message + suffix
+    ok, message = ensure_proxy_on()
+    if not ok:
+        return False, f"已恢复 Tailscale，但系统代理未能开启：{message}"
+    return True, "已恢复：Tailscale 已连接 + TUN 关闭（系统代理保持开启）"

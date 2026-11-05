@@ -152,7 +152,7 @@
       case "macro": return `${(p.steps || []).length} 个步骤` + (Number(p.repeat || 1) > 1 ? ` × ${p.repeat}` : "");
       case "media": return (S.meta?.mediaActions || {})[p.action] || p.action || "";
       case "app_volume": return `${p.process || "cs2.exe"} · ${p.mode === "mute" ? "静音" : p.mode === "full" ? "100%" : "静音 / 100% 切换"}`;
-      case "network_toggle": return "Tailscale + 普通代理 ↔ TUN";
+      case "network_toggle": return "Tailscale ↔ TUN（代理常开）";
       case "mouse": return (S.meta?.mouseActions || {})[p.action] || p.action || "";
       case "system": return (S.meta?.systemActions || {})[p.action] || p.action || "";
       case "clipboard": return (S.meta?.clipboardActions || {})[p.action] || p.action || "";

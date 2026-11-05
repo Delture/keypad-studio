@@ -1,4 +1,4 @@
-# Keypad Studio 1.4.2
+# Keypad Studio 1.4.3
 
 6 键小键盘控制台，适用于 `VID 5A5A / PID 2023`、`Single6VerticalAdvanced` 固件 1.002。
 
@@ -11,7 +11,7 @@
 - 6 个按键独立配置，支持双击动作
 - 动作类型：组合键、文本（中文/Unicode）、打开程序/文件/文件夹/网址、运行 PowerShell/CMD、宏序列、多媒体、应用音量、鼠标、系统功能、剪贴板、窗口、图层、配置
 - 应用音量：切换音量合成器中指定程序的静音/100%，不影响系统音量（默认 1 号键用于 CS2）
-- 网络切换：Tailscale 连接 + Clash Party 普通代理 ↔ Tailscale 断开 + Clash Party TUN 模式（默认 6 号键）
+- 网络切换：Tailscale 连接 + TUN 关闭 ↔ Tailscale 断开 + TUN 开启（两种状态都保持 Clash Party 系统代理开启，默认 6 号键）
 - 配置和图层，可随前台程序自动切换
 - 外设中心：新盟 M75 键盘电量、AUSDOM G04 Ultra 鼠标电量/回报率/DPI（2.4G 接收器直连，无需官方驱动）
 - 系统托盘常驻、开机自启动
@@ -29,7 +29,7 @@
 
 - 键 01 在最左侧，键 06 在最右侧（靠近线缆）。
 - 默认 1 号键：CS2 音量切换（音量合成器中未静音时静音，已静音时恢复到 100%）。CS2 未运行时按 1 号键会提示找不到音频会话。
-- 默认 6 号键：网络组合切换。当前为「Tailscale 已连接 + Clash Party 普通代理 + TUN 关闭」时，切换为「Tailscale 断开 + Clash Party TUN 模式」；其他状态则恢复前者。
+- 默认 6 号键：网络组合切换。当前为「Tailscale 已连接 + TUN 关闭 + 系统代理开启」时，切换为「Tailscale 断开 + TUN 开启 + 系统代理开启」；其他状态则恢复前者。切换时先断开/后连接 Tailscale，避免与 TUN 网卡重叠；TUN 切换失败会自动恢复 Tailscale。
 - 关闭窗口默认最小化到托盘；请在托盘菜单里退出，以停止按键监听。
 - 按键动作依赖本应用在后台运行。
 
@@ -104,8 +104,8 @@ python -m venv .venv
 GitHub Actions（`.github/workflows/build.yml`）在每次推送到 `main` 时构建，并上传 `KeypadStudio-win64.zip` 工件；推送 `v*` 标签时会校验 `backend/constants.py` 里的版本号，然后自动创建 Release 并附上安装包。
 
 ```powershell
-git tag v1.4.2
-git push origin v1.4.2
+git tag v1.4.3
+git push origin v1.4.3
 ```
 
 图标由 `scripts/make_icon.py` 生成（需要 Pillow）。

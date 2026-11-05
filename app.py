@@ -76,7 +76,7 @@ def main() -> int:
         return 0
 
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KeypadStudio.1.4.2")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KeypadStudio.1.4.3")
     except Exception:
         pass
 
