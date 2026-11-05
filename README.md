@@ -1,4 +1,4 @@
-# Keypad Studio 1.4.0
+# Keypad Studio 1.4.1
 
 6 键小键盘控制台，适用于 `VID 5A5A / PID 2023`、`Single6VerticalAdvanced` 固件 1.002。
 
@@ -104,8 +104,8 @@ python -m venv .venv
 GitHub Actions（`.github/workflows/build.yml`）在每次推送到 `main` 时构建，并上传 `KeypadStudio-win64.zip` 工件；推送 `v*` 标签时会校验 `backend/constants.py` 里的版本号，然后自动创建 Release 并附上安装包。
 
 ```powershell
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.4.1
+git push origin v1.4.1
 ```
 
 图标由 `scripts/make_icon.py` 生成（需要 Pillow）。

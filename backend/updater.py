@@ -44,6 +44,52 @@ def parse_version(text: str) -> tuple[int, ...]:
     return tuple(parts) or (0,)
 
 
+def _system_proxies() -> dict[str, str]:
+    """Proxy map from environment, falling back to the Windows WinINET settings.
+
+    ``urllib`` skips the registry when the environment only defines ``NO_PROXY``,
+    which is common with Clash/系统代理; read the registry ourselves so asset
+    downloads work there too.
+    """
+    proxies = {key: value for key, value in urllib.request.getproxies().items() if key in ("http", "https")}
+    if proxies:
+        return proxies
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as key:
+            enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0])
+            if not enabled:
+                return {}
+            server = str(winreg.QueryValueEx(key, "ProxyServer")[0]).strip()
+    except Exception:
+        return {}
+    if not server:
+        return {}
+    if "=" not in server:
+        if not server.startswith(("http://", "https://")):
+            server = "http://" + server
+        return {"http": server, "https": server}
+    result: dict[str, str] = {}
+    for part in server.split(";"):
+        name, _, value = part.partition("=")
+        name = name.strip().lower()
+        value = value.strip()
+        if name in ("http", "https") and value:
+            if not value.startswith(("http://", "https://")):
+                value = "http://" + value
+            result[name] = value
+    return result
+
+
+def _open(request: urllib.request.Request, timeout: float):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(_system_proxies()))
+    return opener.open(request, timeout=timeout)
+
+
 def _error_message(exc: Exception) -> str:
     if isinstance(exc, urllib.error.HTTPError):
         if exc.code == 404:
@@ -119,7 +165,7 @@ class Updater:
                 API_LATEST,
                 headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
             )
-            with urllib.request.urlopen(request, timeout=15) as response:
+            with _open(request, 15) as response:
                 release = json.loads(response.read().decode("utf-8"))
             latest = str(release.get("tag_name") or "").lstrip("vV")
             asset = self._asset(release)
@@ -203,7 +249,7 @@ class Updater:
             total = int(asset.get("size") or 0)
             done = 0
             last_emit = 0.0
-            with urllib.request.urlopen(request, timeout=30) as response, open(archive, "wb") as handle:
+            with _open(request, 30) as response, open(archive, "wb") as handle:
                 declared = int(response.headers.get("Content-Length") or 0)
                 total = total or declared
                 while True:
