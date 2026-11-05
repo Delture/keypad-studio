@@ -357,7 +357,8 @@ set /a TRIES=0
 :wait
 set /a TRIES+=1
 if %TRIES% GTR 90 goto install
-tasklist /FI "PID eq %WAIT_PID%" 2>nul | find "%WAIT_PID%" >nul
+tasklist /FI "PID eq %WAIT_PID%" /NH > "%~dp0wait.txt" 2>nul
+findstr /C:"%WAIT_PID%" "%~dp0wait.txt" >nul
 if errorlevel 1 goto install
 ping -n 2 127.0.0.1 >nul
 goto wait

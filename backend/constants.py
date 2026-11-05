@@ -4,7 +4,7 @@ from __future__ import annotations
 APP_NAME = "Keypad Studio"
 APP_NAME_CN = "小键盘工作室"
 APP_ID = "KeypadStudio"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 VENDOR_ID = 0x5A5A
 PRODUCT_ID = 0x2023
